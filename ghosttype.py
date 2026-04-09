@@ -3,7 +3,7 @@
 ghosttype.py — Reads a text file and types it out using your keyboard.
 Waits 5 seconds after launch so you can focus the target window.
 
-GitHub: https://github.com/yourusername/GhostType
+GitHub: https://github.com/adityadipakpatel/GhostType
 """
 
 import time
