@@ -1,6 +1,6 @@
 # GhostType
 
-A lightweight Python script that reads a text file and types it out for you — keystroke by keystroke — with human-like speed variation and natural punctuation pauses.
+A lightweight Python script that reads a text file and types it out for you — keystroke by keystroke — with human-like speed variation, natural punctuation pauses, and a dedicated full stop delay for Google Docs autosave.
 
 Useful for demos, presentations, filling out forms, or anything where you want text to appear as if it's being typed live.
 
@@ -43,10 +43,11 @@ pip install -r requirements.txt
 
 Replace the contents of `input.txt` with whatever you want typed out.
 
-### 2. Set your speed
+### 2. Configure speed
 
-Open `ghosttype.py` and edit the `SPEED` variable near the top:
+Open `ghosttype.py` and edit the settings near the top.
 
+**Option A — use a preset:**
 ```python
 SPEED = "normal"   # "slow" | "normal" | "fast"
 ```
@@ -57,13 +58,21 @@ SPEED = "normal"   # "slow" | "normal" | "fast"
 | `"normal"` | ~60 WPM      |
 | `"fast"`   | ~120 WPM     |
 
-For precise control, use `CUSTOM_DELAY` (seconds per character) instead:
-
+**Option B — set an exact WPM** (overrides `SPEED` when set):
 ```python
-CUSTOM_DELAY = 0.04   # overrides SPEED when set
+WPM = 75   # types at exactly 75 words per minute
 ```
 
-### 3. Run it
+### 3. Set the full stop pause (Google Docs autosave)
+
+After every `.` GhostType will pause to let Google Docs finish autosaving before continuing. You can control how long:
+
+```python
+FULLSTOP_PAUSE = (2.0, 3.0)   # random between 2 and 3 seconds (default)
+FULLSTOP_PAUSE = 2.5           # fixed 2.5 seconds
+```
+
+### 4. Run it
 
 ```bash
 python ghosttype.py
@@ -82,7 +91,8 @@ python ghosttype.py my_other_file.txt
 GhostType doesn't type at a flat, robotic speed. It adds variation to feel natural:
 
 - **Random jitter** on every keystroke (±30%)
-- **Punctuation pauses** — longer after `.` `!` `?`, shorter after `,` `;`
+- **Full stop pause** — 2–3 second hard stop after `.` for Google Docs autosave
+- **Punctuation pauses** — shorter pauses after `!` `?` `,` `;` `:`
 - **Newline pauses** — a beat between paragraphs
 - **Occasional thinking pauses** — random longer pauses scattered through the text
 
