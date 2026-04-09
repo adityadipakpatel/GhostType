@@ -1,0 +1,7 @@
+Hello! This is a sample text for the typewriter script.
+
+You can replace this file with anything you want typed out. The script will handle punctuation pauses naturally — it slows down after commas, and takes a longer pause after periods. It also adds some random variation to make it feel more human.
+
+Try pasting a long email, a document, or even just random notes. The typewriter will handle it all.
+
+Enjoy!
