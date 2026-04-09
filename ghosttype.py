@@ -33,13 +33,18 @@ SPEED = "normal"
 WPM = None
 
 # ─────────────────────────────────────────────
-#  FULL STOP PAUSE  (for Google Docs autosave)
+#  GOOGLE DOCS AUTOSAVE PAUSES
 # ─────────────────────────────────────────────
 
-# How long to pause after a "." in seconds.
-# Use a fixed number:      FULLSTOP_PAUSE = 2.5
-# Or a random range:       FULLSTOP_PAUSE = (2.0, 3.0)
-FULLSTOP_PAUSE = (2.0, 3.0)
+# Pause after every "." — long enough for Google Docs to register + save.
+# Use a fixed number:    FULLSTOP_PAUSE = 5.0
+# Or a random range:     FULLSTOP_PAUSE = (4.5, 5.5)
+FULLSTOP_PAUSE = (4.5, 5.5)
+
+# Pause every N words — forces a version control checkpoint in Google Docs.
+# After typing this many words, GhostType stops for WORD_CHUNK_PAUSE seconds.
+WORD_CHUNK_SIZE  = 9             # pause every ~9 words (randomly 8–10)
+WORD_CHUNK_PAUSE = (4.5, 5.5)   # how long to pause (seconds)
 
 # ─────────────────────────────────────────────
 #  INPUT FILE
@@ -63,7 +68,7 @@ SPEED_PRESETS = {
     "fast":   0.03,   # ~120 WPM
 }
 
-# Pause multipliers applied after punctuation (multiplied by base delay)
+# Pause multipliers after punctuation (multiplied against base delay)
 # "." is handled separately via FULLSTOP_PAUSE above
 PUNCTUATION_PAUSES = {
     "!":  (2.5, 4.0),
@@ -75,14 +80,13 @@ PUNCTUATION_PAUSES = {
 }
 
 # Occasional "thinking" pause scattered through the text
-THINKING_PAUSE_EVERY  = 80    # roughly every N characters
-THINKING_PAUSE_CHANCE = 0.25  # probability when the window arrives
-THINKING_PAUSE_RANGE  = (0.4, 1.2)   # seconds
+THINKING_PAUSE_EVERY  = 80
+THINKING_PAUSE_CHANCE = 0.25
+THINKING_PAUSE_RANGE  = (0.4, 1.2)
 
 
 def resolve_base_delay() -> float:
     if WPM is not None:
-        # 1 word ≈ 5 chars; delay per char = 60 / (WPM * 5)
         return 60.0 / (float(WPM) * 5)
     key = SPEED.strip().lower()
     if key not in SPEED_PRESETS:
@@ -91,10 +95,16 @@ def resolve_base_delay() -> float:
     return SPEED_PRESETS[key]
 
 
-def resolve_fullstop_pause() -> float:
-    if isinstance(FULLSTOP_PAUSE, (list, tuple)):
-        return random.uniform(FULLSTOP_PAUSE[0], FULLSTOP_PAUSE[1])
-    return float(FULLSTOP_PAUSE)
+def rand_pause(setting) -> float:
+    if isinstance(setting, (list, tuple)):
+        return random.uniform(setting[0], setting[1])
+    return float(setting)
+
+
+def format_pause(setting) -> str:
+    if isinstance(setting, (list, tuple)):
+        return f"{setting[0]}–{setting[1]}s"
+    return f"{setting}s"
 
 
 def load_text(path: str) -> str:
@@ -114,10 +124,16 @@ def countdown(seconds: int):
 
 
 def type_text(text: str, base_delay: float):
-    pyautogui.FAILSAFE = True   # move mouse to top-left corner to abort
+    pyautogui.FAILSAFE = True
 
-    total = len(text)
+    total          = len(text)
     since_thinking = 0
+    word_count     = 0
+    # Pick first chunk target randomly between 8–10 words
+    next_chunk_at  = random.randint(
+        max(1, WORD_CHUNK_SIZE - 1),
+        WORD_CHUNK_SIZE + 1
+    )
 
     for idx, char in enumerate(text):
         # ── type the character ──────────────────────────────────────────
@@ -126,10 +142,24 @@ def type_text(text: str, base_delay: float):
         except Exception:
             pass
 
-        # ── full stop: fixed pause for Google Docs autosave ─────────────
+        # ── count words (space after a word = word boundary) ────────────
+        if char == " ":
+            word_count += 1
+            if word_count >= next_chunk_at:
+                word_count    = 0
+                next_chunk_at = random.randint(
+                    max(1, WORD_CHUNK_SIZE - 1),
+                    WORD_CHUNK_SIZE + 1
+                )
+                time.sleep(rand_pause(WORD_CHUNK_PAUSE))
+                since_thinking = 0
+                continue
+
+        # ── full stop: long pause for Google Docs autosave ──────────────
         if char == ".":
-            time.sleep(resolve_fullstop_pause())
-            since_thinking = 0   # reset thinking counter after the break
+            time.sleep(rand_pause(FULLSTOP_PAUSE))
+            word_count     = 0   # reset chunk counter — sentence already saved
+            since_thinking = 0
             continue
 
         # ── base delay with small random jitter (~±30%) ─────────────────
@@ -164,24 +194,18 @@ def main():
     base_delay = resolve_base_delay()
     text       = load_text(target_file)
 
-    if WPM is not None:
-        speed_label = f"{WPM} WPM (manual)"
-    else:
-        speed_label = f"{SPEED}  ({round(60 / (base_delay * 5))} WPM)"
-
-    if isinstance(FULLSTOP_PAUSE, (list, tuple)):
-        pause_label = f"{FULLSTOP_PAUSE[0]}–{FULLSTOP_PAUSE[1]}s"
-    else:
-        pause_label = f"{FULLSTOP_PAUSE}s"
+    speed_label = f"{WPM} WPM (manual)" if WPM is not None \
+                  else f"{SPEED}  ({round(60 / (base_delay * 5))} WPM)"
 
     print(f"─────────────────────────────────────")
     print(f"  GhostType")
     print(f"─────────────────────────────────────")
-    print(f"  File        : {target_file}")
-    print(f"  Chars       : {len(text)}")
-    print(f"  Speed       : {speed_label}")
-    print(f"  Full stop   : pause {pause_label} after each \".\"")
-    print(f"  Tip         : Move mouse to top-left corner to abort.")
+    print(f"  File         : {target_file}")
+    print(f"  Chars        : {len(text)}")
+    print(f"  Speed        : {speed_label}")
+    print(f"  Full stop    : pause {format_pause(FULLSTOP_PAUSE)} after each \".\"")
+    print(f"  Word chunks  : pause {format_pause(WORD_CHUNK_PAUSE)} every ~{WORD_CHUNK_SIZE} words")
+    print(f"  Tip          : Move mouse to top-left corner to abort.")
 
     countdown(COUNTDOWN)
     type_text(text, base_delay)

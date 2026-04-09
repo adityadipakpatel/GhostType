@@ -1,6 +1,6 @@
 # GhostType
 
-A lightweight Python script that reads a text file and types it out for you — keystroke by keystroke — with human-like speed variation, natural punctuation pauses, and a dedicated full stop delay for Google Docs autosave.
+A lightweight Python script that reads a text file and types it out for you — keystroke by keystroke — with human-like speed variation, natural punctuation pauses, and Google Docs-friendly autosave checkpoints.
 
 Useful for demos, presentations, filling out forms, or anything where you want text to appear as if it's being typed live.
 
@@ -63,13 +63,20 @@ SPEED = "normal"   # "slow" | "normal" | "fast"
 WPM = 75   # types at exactly 75 words per minute
 ```
 
-### 3. Set the full stop pause (Google Docs autosave)
+### 3. Configure Google Docs autosave pauses
 
-After every `.` GhostType will pause to let Google Docs finish autosaving before continuing. You can control how long:
+GhostType has two pauses specifically for keeping Google Docs happy:
 
+**Full stop pause** — after every `.`, GhostType stops long enough for Docs to register and save the sentence:
 ```python
-FULLSTOP_PAUSE = (2.0, 3.0)   # random between 2 and 3 seconds (default)
-FULLSTOP_PAUSE = 2.5           # fixed 2.5 seconds
+FULLSTOP_PAUSE = (4.5, 5.5)   # random 4.5–5.5 seconds (default)
+FULLSTOP_PAUSE = 5.0           # or a fixed value
+```
+
+**Word chunk pause** — every 8–10 words, GhostType takes a longer break to force a version history checkpoint:
+```python
+WORD_CHUNK_SIZE  = 9             # pause roughly every 9 words
+WORD_CHUNK_PAUSE = (4.5, 5.5)   # pause duration in seconds
 ```
 
 ### 4. Run it
@@ -91,7 +98,8 @@ python ghosttype.py my_other_file.txt
 GhostType doesn't type at a flat, robotic speed. It adds variation to feel natural:
 
 - **Random jitter** on every keystroke (±30%)
-- **Full stop pause** — 2–3 second hard stop after `.` for Google Docs autosave
+- **Full stop pause** — ~5 second stop after `.` for Google Docs to save
+- **Word chunk pause** — ~5 second stop every 8–10 words for version history
 - **Punctuation pauses** — shorter pauses after `!` `?` `,` `;` `:`
 - **Newline pauses** — a beat between paragraphs
 - **Occasional thinking pauses** — random longer pauses scattered through the text
