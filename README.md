@@ -9,9 +9,10 @@ Useful for demos, presentations, filling out forms, or anything where you want t
 ## How it works
 
 1. Put your text in `input.txt`
-2. Run the script
-3. You have **5 seconds** to click into the window you want the text typed into
-4. GhostType does the rest
+2. Run the script — a summary screen shows character count, word count, speed settings, and an estimated completion time broken down by each source of delay
+3. Type `y` to confirm and start, or `n` to cancel
+4. You have **5 seconds** to click into the window you want the text typed into
+5. GhostType does the rest
 
 Move your mouse to the **top-left corner of your screen** at any time to immediately stop the script (pyautogui failsafe).
 
@@ -65,15 +66,13 @@ WPM = 75   # types at exactly 75 words per minute
 
 ### 3. Configure Google Docs autosave pauses
 
-GhostType has two pauses specifically for keeping Google Docs happy:
-
-**Full stop pause** — after every `.`, GhostType stops long enough for Docs to register and save the sentence:
+**Full stop pause** — after every `.`, GhostType stops for Docs to save:
 ```python
 FULLSTOP_PAUSE = (4.5, 5.5)   # random 4.5–5.5 seconds (default)
 FULLSTOP_PAUSE = 5.0           # or a fixed value
 ```
 
-**Word chunk pause** — every 8–10 words, GhostType takes a longer break to force a version history checkpoint:
+**Word chunk pause** — every 8–10 words, GhostType pauses to force a version history checkpoint:
 ```python
 WORD_CHUNK_SIZE  = 9             # pause roughly every 9 words
 WORD_CHUNK_PAUSE = (4.5, 5.5)   # pause duration in seconds
@@ -84,6 +83,37 @@ WORD_CHUNK_PAUSE = (4.5, 5.5)   # pause duration in seconds
 ```bash
 python ghosttype.py
 ```
+
+You'll see a summary like this before anything starts:
+
+```
+  ┌─────────────────────────────────────────┐
+  │              GhostType                  │
+  └─────────────────────────────────────────┘
+
+  TEXT
+    Characters   1,240
+    Words        214
+    Lines        8
+    Full stops   12
+
+  SPEED
+    Typing       normal (60 WPM)
+    Base delay   0.060s / char
+
+  ESTIMATED TIME BREAKDOWN
+    Typing               2m 04s
+    Punctuation pauses   18s
+    Full stop pauses     1m 00s  (12 × ~5.0s)
+    Word chunk pauses    1m 10s  (~23 pauses × ~5.0s)
+    Thinking pauses      6s
+    ─────────────────────────────────
+    Total (approx)       4m 38s
+
+  Start typing? [y/n]:
+```
+
+Type `y` to proceed, `n` to cancel.
 
 You can also pass a different file as an argument:
 

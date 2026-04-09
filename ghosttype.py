@@ -28,7 +28,6 @@ except ImportError:
 SPEED = "normal"
 
 # Option B — set an exact WPM (overrides SPEED above if set)
-# Average English word is ~5 characters.
 # Example: WPM = 80  →  types at exactly 80 words per minute
 WPM = None
 
@@ -42,7 +41,6 @@ WPM = None
 FULLSTOP_PAUSE = (4.5, 5.5)
 
 # Pause every N words — forces a version control checkpoint in Google Docs.
-# After typing this many words, GhostType stops for WORD_CHUNK_PAUSE seconds.
 WORD_CHUNK_SIZE  = 9             # pause every ~9 words (randomly 8–10)
 WORD_CHUNK_PAUSE = (4.5, 5.5)   # how long to pause (seconds)
 
@@ -68,8 +66,6 @@ SPEED_PRESETS = {
     "fast":   0.03,   # ~120 WPM
 }
 
-# Pause multipliers after punctuation (multiplied against base delay)
-# "." is handled separately via FULLSTOP_PAUSE above
 PUNCTUATION_PAUSES = {
     "!":  (2.5, 4.0),
     "?":  (2.5, 4.0),
@@ -79,7 +75,6 @@ PUNCTUATION_PAUSES = {
     "\n": (1.8, 3.0),
 }
 
-# Occasional "thinking" pause scattered through the text
 THINKING_PAUSE_EVERY  = 80
 THINKING_PAUSE_CHANCE = 0.25
 THINKING_PAUSE_RANGE  = (0.4, 1.2)
@@ -101,10 +96,78 @@ def rand_pause(setting) -> float:
     return float(setting)
 
 
+def avg_pause(setting) -> float:
+    if isinstance(setting, (list, tuple)):
+        return (setting[0] + setting[1]) / 2
+    return float(setting)
+
+
 def format_pause(setting) -> str:
     if isinstance(setting, (list, tuple)):
         return f"{setting[0]}–{setting[1]}s"
     return f"{setting}s"
+
+
+def format_duration(seconds: float) -> str:
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds}s"
+    elif seconds < 3600:
+        m, s = divmod(seconds, 60)
+        return f"{m}m {s:02d}s"
+    else:
+        h, rem = divmod(seconds, 3600)
+        m, s   = divmod(rem, 60)
+        return f"{h}h {m:02d}m {s:02d}s"
+
+
+def estimate_duration(text: str, base_delay: float) -> dict:
+    char_count  = len(text)
+    word_count  = len(text.split())
+    line_count  = text.count("\n")
+
+    # Pure typing time (base delay × chars, no pauses)
+    typing_time = char_count * base_delay
+
+    # Jitter is symmetric so average delay = base_delay (no net change)
+
+    # Punctuation pause time
+    punct_time = 0.0
+    for char, (lo, hi) in PUNCTUATION_PAUSES.items():
+        n = text.count(char)
+        # actual pause = base_delay * jitter * multiplier; avg jitter = 1.0
+        punct_time += n * base_delay * ((lo + hi) / 2)
+
+    # Full stop pause time
+    fullstop_count = text.count(".")
+    fullstop_time  = fullstop_count * avg_pause(FULLSTOP_PAUSE)
+
+    # Word chunk pause time
+    # Every WORD_CHUNK_SIZE words → one pause; but fullstops reset the counter,
+    # so approximate chunks as: (word_count - fullstop_count) / WORD_CHUNK_SIZE
+    effective_words  = max(0, word_count - fullstop_count)
+    chunk_pauses     = effective_words / max(1, WORD_CHUNK_SIZE)
+    chunk_time       = chunk_pauses * avg_pause(WORD_CHUNK_PAUSE)
+
+    # Thinking pauses: ~25% chance every 80 chars, avg pause 0.8s
+    thinking_windows = char_count / THINKING_PAUSE_EVERY
+    thinking_time    = thinking_windows * THINKING_PAUSE_CHANCE * sum(THINKING_PAUSE_RANGE) / 2
+
+    total = typing_time + punct_time + fullstop_time + chunk_time + thinking_time
+
+    return {
+        "char_count":     char_count,
+        "word_count":     word_count,
+        "line_count":     line_count + 1,
+        "fullstops":      fullstop_count,
+        "chunk_pauses":   int(chunk_pauses),
+        "typing_time":    typing_time,
+        "punct_time":     punct_time,
+        "fullstop_time":  fullstop_time,
+        "chunk_time":     chunk_time,
+        "thinking_time":  thinking_time,
+        "total":          total,
+    }
 
 
 def load_text(path: str) -> str:
@@ -129,49 +192,36 @@ def type_text(text: str, base_delay: float):
     total          = len(text)
     since_thinking = 0
     word_count     = 0
-    # Pick first chunk target randomly between 8–10 words
-    next_chunk_at  = random.randint(
-        max(1, WORD_CHUNK_SIZE - 1),
-        WORD_CHUNK_SIZE + 1
-    )
+    next_chunk_at  = random.randint(max(1, WORD_CHUNK_SIZE - 1), WORD_CHUNK_SIZE + 1)
 
     for idx, char in enumerate(text):
-        # ── type the character ──────────────────────────────────────────
         try:
             pyautogui.typewrite(char, interval=0)
         except Exception:
             pass
 
-        # ── count words (space after a word = word boundary) ────────────
         if char == " ":
             word_count += 1
             if word_count >= next_chunk_at:
                 word_count    = 0
-                next_chunk_at = random.randint(
-                    max(1, WORD_CHUNK_SIZE - 1),
-                    WORD_CHUNK_SIZE + 1
-                )
+                next_chunk_at = random.randint(max(1, WORD_CHUNK_SIZE - 1), WORD_CHUNK_SIZE + 1)
                 time.sleep(rand_pause(WORD_CHUNK_PAUSE))
                 since_thinking = 0
                 continue
 
-        # ── full stop: long pause for Google Docs autosave ──────────────
         if char == ".":
             time.sleep(rand_pause(FULLSTOP_PAUSE))
-            word_count     = 0   # reset chunk counter — sentence already saved
+            word_count     = 0
             since_thinking = 0
             continue
 
-        # ── base delay with small random jitter (~±30%) ─────────────────
         jitter = random.uniform(0.70, 1.30)
         delay  = base_delay * jitter
 
-        # ── other punctuation pause ──────────────────────────────────────
         if char in PUNCTUATION_PAUSES:
             low, high = PUNCTUATION_PAUSES[char]
             delay *= random.uniform(low, high)
 
-        # ── occasional thinking pause ────────────────────────────────────
         since_thinking += 1
         if since_thinking >= THINKING_PAUSE_EVERY:
             since_thinking = 0
@@ -180,7 +230,6 @@ def type_text(text: str, base_delay: float):
 
         time.sleep(delay)
 
-        # progress indicator every 100 chars
         if (idx + 1) % 100 == 0:
             pct = (idx + 1) / total * 100
             print(f"  {pct:.0f}% typed ({idx+1}/{total} chars)", end="\r", flush=True)
@@ -188,25 +237,56 @@ def type_text(text: str, base_delay: float):
     print(f"\n\nDone! {total} characters typed.")
 
 
+def confirm_or_exit(est: dict, base_delay: float):
+    wpm_effective = WPM if WPM is not None else round(60 / (base_delay * 5))
+    speed_label   = f"{WPM} WPM (manual)" if WPM is not None else f"{SPEED} ({wpm_effective} WPM)"
+
+    print()
+    print("  ┌─────────────────────────────────────────┐")
+    print("  │              GhostType                  │")
+    print("  └─────────────────────────────────────────┘")
+    print()
+    print("  TEXT")
+    print(f"    Characters   {est['char_count']}")
+    print(f"    Words        {est['word_count']}")
+    print(f"    Lines        {est['line_count']}")
+    print(f"    Full stops   {est['fullstops']}")
+    print()
+    print("  SPEED")
+    print(f"    Typing       {speed_label}")
+    print(f"    Base delay   {base_delay:.3f}s / char")
+    print()
+    print("  ESTIMATED TIME BREAKDOWN")
+    print(f"    Typing               {format_duration(est['typing_time'])}")
+    print(f"    Punctuation pauses   {format_duration(est['punct_time'])}")
+    print(f"    Full stop pauses     {format_duration(est['fullstop_time'])}  ({est['fullstops']} × ~{avg_pause(FULLSTOP_PAUSE):.1f}s)")
+    print(f"    Word chunk pauses    {format_duration(est['chunk_time'])}  (~{est['chunk_pauses']} pauses × ~{avg_pause(WORD_CHUNK_PAUSE):.1f}s)")
+    print(f"    Thinking pauses      {format_duration(est['thinking_time'])}")
+    print(f"    ─────────────────────────────────")
+    print(f"    Total (approx)       {format_duration(est['total'])}")
+    print()
+    print("  Tip: Move mouse to top-left corner to abort at any time.")
+    print()
+
+    while True:
+        answer = input("  Start typing? [y/n]: ").strip().lower()
+        if answer == "y":
+            break
+        elif answer == "n":
+            print("\n  Aborted.")
+            sys.exit(0)
+        else:
+            print("  Please type y or n.")
+
+
 def main():
     target_file = sys.argv[1] if len(sys.argv) > 1 else INPUT_FILE
 
     base_delay = resolve_base_delay()
     text       = load_text(target_file)
+    est        = estimate_duration(text, base_delay)
 
-    speed_label = f"{WPM} WPM (manual)" if WPM is not None \
-                  else f"{SPEED}  ({round(60 / (base_delay * 5))} WPM)"
-
-    print(f"─────────────────────────────────────")
-    print(f"  GhostType")
-    print(f"─────────────────────────────────────")
-    print(f"  File         : {target_file}")
-    print(f"  Chars        : {len(text)}")
-    print(f"  Speed        : {speed_label}")
-    print(f"  Full stop    : pause {format_pause(FULLSTOP_PAUSE)} after each \".\"")
-    print(f"  Word chunks  : pause {format_pause(WORD_CHUNK_PAUSE)} every ~{WORD_CHUNK_SIZE} words")
-    print(f"  Tip          : Move mouse to top-left corner to abort.")
-
+    confirm_or_exit(est, base_delay)
     countdown(COUNTDOWN)
     type_text(text, base_delay)
 
