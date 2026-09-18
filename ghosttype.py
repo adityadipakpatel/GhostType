@@ -1,69 +1,66 @@
 #!/usr/bin/env python3
 """
 ghosttype.py — Reads a text file and types it out using your keyboard.
-Waits 5 seconds after launch so you can focus the target window.
+Waits a few seconds after launch so you can focus the target window.
 
 GitHub: https://github.com/adityadipakpatel/GhostType
 """
 
-import time
-import random
-import sys
+import argparse
 import os
+import random
+import shutil
+import subprocess
+import sys
+import time
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Optional, Tuple, Union
 
 try:
     import pyautogui
 except ImportError:
-    print("Missing dependency: pyautogui\nRun:  pip install pyautogui")
+    print("Missing dependency: pyautogui\nRun:  pip install -r requirements.txt")
     sys.exit(1)
 
-# ─────────────────────────────────────────────
-#  SPEED SETTINGS  (edit these)
-# ─────────────────────────────────────────────
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
-# Option A — pick a preset:
-#   "slow"   →  ~30 WPM
-#   "normal" →  ~60 WPM  (default)
-#   "fast"   →  ~120 WPM
-SPEED = "normal"
+try:
+    from colorama import Fore, Style, init as _colorama_init
+    _colorama_init()
+except ImportError:
+    class _NoColor:
+        def __getattr__(self, _name):
+            return ""
+    Fore = Style = _NoColor()
 
-# Option B — set an exact WPM (overrides SPEED above if set)
-# Example: WPM = 80  →  types at exactly 80 words per minute
-WPM = None
+try:
+    from tqdm import tqdm
+    _TQDM_AVAILABLE = True
+except ImportError:
+    _TQDM_AVAILABLE = False
 
-# ─────────────────────────────────────────────
-#  GOOGLE DOCS AUTOSAVE PAUSES
-# ─────────────────────────────────────────────
 
-# Pause after every "." — long enough for Google Docs to register + save.
-# Use a fixed number:    FULLSTOP_PAUSE = 5.0
-# Or a random range:     FULLSTOP_PAUSE = (4.5, 5.5)
-FULLSTOP_PAUSE = (4.5, 5.5)
-
-# Pause every N words — forces a version control checkpoint in Google Docs.
-WORD_CHUNK_SIZE  = 9             # pause every ~9 words (randomly 8–10)
-WORD_CHUNK_PAUSE = (4.5, 5.5)   # how long to pause (seconds)
+PauseSetting = Union[float, Tuple[float, float]]
 
 # ─────────────────────────────────────────────
-#  INPUT FILE
-# ─────────────────────────────────────────────
-
-INPUT_FILE = "input.txt"
-
-# ─────────────────────────────────────────────
-#  COUNTDOWN DURATION (seconds before typing)
-# ─────────────────────────────────────────────
-
-COUNTDOWN = 5
-
-# ─────────────────────────────────────────────
-#  (no need to edit below this line)
+#  CONSTANTS (not meant to be reconfigured)
 # ─────────────────────────────────────────────
 
 SPEED_PRESETS = {
     "slow":   0.12,   # ~30 WPM
     "normal": 0.06,   # ~60 WPM
     "fast":   0.03,   # ~120 WPM
+}
+
+SPEED_LABELS = {
+    "slow": "~30 WPM",
+    "normal": "~60 WPM",
+    "fast": "~120 WPM",
 }
 
 PUNCTUATION_PAUSES = {
@@ -75,37 +72,126 @@ PUNCTUATION_PAUSES = {
     "\n": (1.8, 3.0),
 }
 
-THINKING_PAUSE_EVERY  = 80
-THINKING_PAUSE_CHANCE = 0.25
-THINKING_PAUSE_RANGE  = (0.4, 1.2)
+QWERTY_NEIGHBORS = {
+    "a": "qsz", "b": "vghn", "c": "xdfv", "d": "serfcx", "e": "wsdr",
+    "f": "drtgvc", "g": "ftyhbv", "h": "gyujnb", "i": "ujko", "j": "huikmn",
+    "k": "jiolm", "l": "kop", "m": "njk", "n": "bhjm", "o": "iklp",
+    "p": "ol", "q": "wa", "r": "edft", "s": "awedxz", "t": "rfgy",
+    "u": "yhji", "v": "cfgb", "w": "qase", "x": "zsdc", "y": "tghu",
+    "z": "asx",
+}
+
+# ─────────────────────────────────────────────
+#  CONFIG (loaded from .env, overridable via CLI flags)
+# ─────────────────────────────────────────────
 
 
-def resolve_base_delay() -> float:
-    if WPM is not None:
-        return 60.0 / (float(WPM) * 5)
-    key = SPEED.strip().lower()
-    if key not in SPEED_PRESETS:
-        print(f"Unknown SPEED '{SPEED}'. Choose: slow / normal / fast")
-        sys.exit(1)
-    return SPEED_PRESETS[key]
+@dataclass
+class Config:
+    speed: str = "normal"
+    wpm: Optional[float] = None
+    fullstop_pause: PauseSetting = (4.5, 5.5)
+    word_chunk_size: int = 9
+    word_chunk_pause: PauseSetting = (4.5, 5.5)
+    input_file: str = "input.txt"
+    countdown: int = 5
+    typo_chance: float = 0.0
+    typo_pause: PauseSetting = (0.15, 0.35)
+    thinking_pause_every: int = 80
+    thinking_pause_chance: float = 0.25
+    thinking_pause_range: PauseSetting = (0.4, 1.2)
+    sound_on_complete: bool = True
+    color: bool = True
 
 
-def rand_pause(setting) -> float:
+def _env(name: str) -> Optional[str]:
+    val = os.getenv(name)
+    return val if val not in (None, "") else None
+
+
+def env_str(name: str, default: str) -> str:
+    return _env(name) or default
+
+
+def env_int(name: str, default: int) -> int:
+    val = _env(name)
+    return int(val) if val is not None else default
+
+
+def env_float_or_none(name: str, default: Optional[float]) -> Optional[float]:
+    val = _env(name)
+    return float(val) if val is not None else default
+
+
+def env_bool(name: str, default: bool) -> bool:
+    val = _env(name)
+    if val is None:
+        return default
+    return val.strip().lower() in ("1", "true", "yes", "on")
+
+
+def env_pause(name: str, default: PauseSetting) -> PauseSetting:
+    val = _env(name)
+    if val is None:
+        return default
+    parts = [p.strip() for p in val.split(",") if p.strip()]
+    if len(parts) == 1:
+        return float(parts[0])
+    if len(parts) == 2:
+        return (float(parts[0]), float(parts[1]))
+    raise ValueError(f"Invalid pause range for {name}: {val!r} (expected 'x' or 'x,y')")
+
+
+def load_config() -> Config:
+    return Config(
+        speed=env_str("SPEED", "normal"),
+        wpm=env_float_or_none("WPM", None),
+        fullstop_pause=env_pause("FULLSTOP_PAUSE", (4.5, 5.5)),
+        word_chunk_size=env_int("WORD_CHUNK_SIZE", 9),
+        word_chunk_pause=env_pause("WORD_CHUNK_PAUSE", (4.5, 5.5)),
+        input_file=env_str("INPUT_FILE", "input.txt"),
+        countdown=env_int("COUNTDOWN", 5),
+        typo_chance=env_float_or_none("TYPO_CHANCE", 0.0),
+        typo_pause=env_pause("TYPO_PAUSE", (0.15, 0.35)),
+        thinking_pause_every=env_int("THINKING_PAUSE_EVERY", 80),
+        thinking_pause_chance=env_float_or_none("THINKING_PAUSE_CHANCE", 0.25),
+        thinking_pause_range=env_pause("THINKING_PAUSE_RANGE", (0.4, 1.2)),
+        sound_on_complete=env_bool("SOUND_ON_COMPLETE", True),
+        color=env_bool("COLOR_OUTPUT", True),
+    )
+
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        description="GhostType — types out a text file like a human.",
+        epilog="Settings default to .env, and can be overridden with these flags.",
+    )
+    p.add_argument("file", nargs="?", help="Text file to type (overrides INPUT_FILE)")
+    p.add_argument("--speed", choices=["slow", "normal", "fast"], help="Speed preset")
+    p.add_argument("--wpm", type=float, help="Exact words-per-minute (overrides --speed)")
+    p.add_argument("--countdown", type=int, help="Seconds to wait before typing starts")
+    p.add_argument("--dry-run", action="store_true", help="Show the time estimate only; don't type anything")
+    p.add_argument("-y", "--yes", action="store_true", help="Skip the y/n confirmation prompt")
+    p.add_argument("--no-color", action="store_true", help="Disable colored output")
+    p.add_argument("--no-sound", action="store_true", help="Disable the completion sound/notification")
+    return p.parse_args()
+
+
+# ─────────────────────────────────────────────
+#  HELPERS
+# ─────────────────────────────────────────────
+
+
+def rand_pause(setting: PauseSetting) -> float:
     if isinstance(setting, (list, tuple)):
         return random.uniform(setting[0], setting[1])
     return float(setting)
 
 
-def avg_pause(setting) -> float:
+def avg_pause(setting: PauseSetting) -> float:
     if isinstance(setting, (list, tuple)):
         return (setting[0] + setting[1]) / 2
     return float(setting)
-
-
-def format_pause(setting) -> str:
-    if isinstance(setting, (list, tuple)):
-        return f"{setting[0]}–{setting[1]}s"
-    return f"{setting}s"
 
 
 def format_duration(seconds: float) -> str:
@@ -117,56 +203,72 @@ def format_duration(seconds: float) -> str:
         return f"{m}m {s:02d}s"
     else:
         h, rem = divmod(seconds, 3600)
-        m, s   = divmod(rem, 60)
+        m, s = divmod(rem, 60)
         return f"{h}h {m:02d}m {s:02d}s"
 
 
-def estimate_duration(text: str, base_delay: float) -> dict:
-    char_count  = len(text)
-    word_count  = len(text.split())
-    line_count  = text.count("\n")
+def format_clock(dt: datetime) -> str:
+    return dt.strftime("%I:%M %p").lstrip("0")
 
-    # Pure typing time (base delay × chars, no pauses)
+
+def colorize(text: str, color: str, cfg: Config) -> str:
+    if not cfg.color:
+        return text
+    return f"{color}{text}{Style.RESET_ALL}"
+
+
+def resolve_base_delay(cfg: Config) -> float:
+    if cfg.wpm is not None:
+        return 60.0 / (float(cfg.wpm) * 5)
+    key = cfg.speed.strip().lower()
+    if key not in SPEED_PRESETS:
+        print(f"Unknown SPEED '{cfg.speed}'. Choose: slow / normal / fast")
+        sys.exit(1)
+    return SPEED_PRESETS[key]
+
+
+def estimate_duration(text: str, base_delay: float, cfg: Config) -> dict:
+    char_count = len(text)
+    word_count = len(text.split())
+    line_count = text.count("\n")
+    alpha_count = sum(1 for c in text if c.isalpha())
+
     typing_time = char_count * base_delay
 
-    # Jitter is symmetric so average delay = base_delay (no net change)
-
-    # Punctuation pause time
     punct_time = 0.0
     for char, (lo, hi) in PUNCTUATION_PAUSES.items():
         n = text.count(char)
-        # actual pause = base_delay * jitter * multiplier; avg jitter = 1.0
         punct_time += n * base_delay * ((lo + hi) / 2)
 
-    # Full stop pause time
     fullstop_count = text.count(".")
-    fullstop_time  = fullstop_count * avg_pause(FULLSTOP_PAUSE)
+    fullstop_time = fullstop_count * avg_pause(cfg.fullstop_pause)
 
-    # Word chunk pause time
-    # Every WORD_CHUNK_SIZE words → one pause; but fullstops reset the counter,
-    # so approximate chunks as: (word_count - fullstop_count) / WORD_CHUNK_SIZE
-    effective_words  = max(0, word_count - fullstop_count)
-    chunk_pauses     = effective_words / max(1, WORD_CHUNK_SIZE)
-    chunk_time       = chunk_pauses * avg_pause(WORD_CHUNK_PAUSE)
+    effective_words = max(0, word_count - fullstop_count)
+    chunk_pauses = effective_words / max(1, cfg.word_chunk_size)
+    chunk_time = chunk_pauses * avg_pause(cfg.word_chunk_pause)
 
-    # Thinking pauses: ~25% chance every 80 chars, avg pause 0.8s
-    thinking_windows = char_count / THINKING_PAUSE_EVERY
-    thinking_time    = thinking_windows * THINKING_PAUSE_CHANCE * sum(THINKING_PAUSE_RANGE) / 2
+    thinking_windows = char_count / cfg.thinking_pause_every
+    thinking_time = thinking_windows * cfg.thinking_pause_chance * sum(cfg.thinking_pause_range) / 2
 
-    total = typing_time + punct_time + fullstop_time + chunk_time + thinking_time
+    typo_time = 0.0
+    if cfg.typo_chance > 0:
+        typo_time = alpha_count * cfg.typo_chance * (2 * base_delay + 2 * avg_pause(cfg.typo_pause))
+
+    total = typing_time + punct_time + fullstop_time + chunk_time + thinking_time + typo_time
 
     return {
-        "char_count":     char_count,
-        "word_count":     word_count,
-        "line_count":     line_count + 1,
-        "fullstops":      fullstop_count,
-        "chunk_pauses":   int(chunk_pauses),
-        "typing_time":    typing_time,
-        "punct_time":     punct_time,
-        "fullstop_time":  fullstop_time,
-        "chunk_time":     chunk_time,
-        "thinking_time":  thinking_time,
-        "total":          total,
+        "char_count": char_count,
+        "word_count": word_count,
+        "line_count": line_count + 1,
+        "fullstops": fullstop_count,
+        "chunk_pauses": int(chunk_pauses),
+        "typing_time": typing_time,
+        "punct_time": punct_time,
+        "fullstop_time": fullstop_time,
+        "chunk_time": chunk_time,
+        "thinking_time": thinking_time,
+        "typo_time": typo_time,
+        "total": total,
     }
 
 
@@ -178,73 +280,35 @@ def load_text(path: str) -> str:
         return f.read()
 
 
-def countdown(seconds: int):
-    print(f"\nSwitch to your target window now!\n")
-    for i in range(seconds, 0, -1):
-        print(f"  Starting in {i}...", end="\r", flush=True)
-        time.sleep(1)
-    print("  Typing now!              ")
-
-
-def type_text(text: str, base_delay: float):
-    pyautogui.FAILSAFE = True
-
-    total          = len(text)
-    since_thinking = 0
-    word_count     = 0
-    next_chunk_at  = random.randint(max(1, WORD_CHUNK_SIZE - 1), WORD_CHUNK_SIZE + 1)
-
-    for idx, char in enumerate(text):
+def notify_done(cfg: Config):
+    if not cfg.sound_on_complete:
+        return
+    print("\a", end="", flush=True)
+    if shutil.which("notify-send"):
         try:
-            pyautogui.typewrite(char, interval=0)
+            subprocess.run(
+                ["notify-send", "GhostType", "Typing complete!"],
+                check=False, timeout=2,
+            )
         except Exception:
             pass
 
-        if char == " ":
-            word_count += 1
-            if word_count >= next_chunk_at:
-                word_count    = 0
-                next_chunk_at = random.randint(max(1, WORD_CHUNK_SIZE - 1), WORD_CHUNK_SIZE + 1)
-                time.sleep(rand_pause(WORD_CHUNK_PAUSE))
-                since_thinking = 0
-                continue
 
-        if char == ".":
-            time.sleep(rand_pause(FULLSTOP_PAUSE))
-            word_count     = 0
-            since_thinking = 0
-            continue
-
-        jitter = random.uniform(0.70, 1.30)
-        delay  = base_delay * jitter
-
-        if char in PUNCTUATION_PAUSES:
-            low, high = PUNCTUATION_PAUSES[char]
-            delay *= random.uniform(low, high)
-
-        since_thinking += 1
-        if since_thinking >= THINKING_PAUSE_EVERY:
-            since_thinking = 0
-            if random.random() < THINKING_PAUSE_CHANCE:
-                delay += random.uniform(*THINKING_PAUSE_RANGE)
-
-        time.sleep(delay)
-
-        if (idx + 1) % 100 == 0:
-            pct = (idx + 1) / total * 100
-            print(f"  {pct:.0f}% typed ({idx+1}/{total} chars)", end="\r", flush=True)
-
-    print(f"\n\nDone! {total} characters typed.")
+# ─────────────────────────────────────────────
+#  DISPLAY
+# ─────────────────────────────────────────────
 
 
-def confirm_or_exit(est: dict, base_delay: float):
-    wpm_effective = WPM if WPM is not None else round(60 / (base_delay * 5))
-    speed_label   = f"{WPM} WPM (manual)" if WPM is not None else f"{SPEED} ({wpm_effective} WPM)"
+def print_summary(est: dict, base_delay: float, cfg: Config, finish_time: datetime):
+    speed_label = (
+        f"{cfg.wpm:g} WPM (manual)" if cfg.wpm is not None
+        else f"{cfg.speed} ({SPEED_LABELS.get(cfg.speed.lower(), '?')})"
+    )
 
     print()
-    print("  ┌─────────────────────────────────────────┐")
-    print("  │              GhostType                  │")
-    print("  └─────────────────────────────────────────┘")
+    print(colorize("  ┌─────────────────────────────────────────┐", Fore.CYAN, cfg))
+    print(colorize("  │              GhostType                  │", Fore.CYAN, cfg))
+    print(colorize("  └─────────────────────────────────────────┘", Fore.CYAN, cfg))
     print()
     print("  TEXT")
     print(f"    Characters   {est['char_count']}")
@@ -255,40 +319,181 @@ def confirm_or_exit(est: dict, base_delay: float):
     print("  SPEED")
     print(f"    Typing       {speed_label}")
     print(f"    Base delay   {base_delay:.3f}s / char")
+    if cfg.typo_chance > 0:
+        print(f"    Typos        ~{cfg.typo_chance * 100:.0f}% chance per letter (auto-corrected)")
     print()
     print("  ESTIMATED TIME BREAKDOWN")
     print(f"    Typing               {format_duration(est['typing_time'])}")
     print(f"    Punctuation pauses   {format_duration(est['punct_time'])}")
-    print(f"    Full stop pauses     {format_duration(est['fullstop_time'])}  ({est['fullstops']} × ~{avg_pause(FULLSTOP_PAUSE):.1f}s)")
-    print(f"    Word chunk pauses    {format_duration(est['chunk_time'])}  (~{est['chunk_pauses']} pauses × ~{avg_pause(WORD_CHUNK_PAUSE):.1f}s)")
+    print(f"    Full stop pauses     {format_duration(est['fullstop_time'])}  ({est['fullstops']} × ~{avg_pause(cfg.fullstop_pause):.1f}s)")
+    print(f"    Word chunk pauses    {format_duration(est['chunk_time'])}  (~{est['chunk_pauses']} pauses × ~{avg_pause(cfg.word_chunk_pause):.1f}s)")
     print(f"    Thinking pauses      {format_duration(est['thinking_time'])}")
-    print(f"    ─────────────────────────────────")
-    print(f"    Total (approx)       {format_duration(est['total'])}")
+    if cfg.typo_chance > 0:
+        print(f"    Typo corrections     {format_duration(est['typo_time'])}")
+    print("    ─────────────────────────────────")
+    print(f"    Total (approx)       {colorize(format_duration(est['total']), Fore.YELLOW, cfg)}")
     print()
-    print("  Tip: Move mouse to top-left corner to abort at any time.")
+    print(f"  Estimated finish time: {colorize(format_clock(finish_time), Fore.YELLOW, cfg)} (if you start now)")
+    print()
+    print("  Tip: Move your mouse to the top-left corner to abort at any time.")
     print()
 
+
+def confirm():
     while True:
         answer = input("  Start typing? [y/n]: ").strip().lower()
         if answer == "y":
-            break
-        elif answer == "n":
+            return
+        if answer == "n":
             print("\n  Aborted.")
             sys.exit(0)
-        else:
-            print("  Please type y or n.")
+        print("  Please type y or n.")
+
+
+def countdown(seconds: int, total_estimate: float, cfg: Config):
+    duration_label = format_duration(total_estimate)
+    print()
+    print(colorize("  Switch to your target window now!", Fore.CYAN, cfg))
+    print(f"  Typing will take about {duration_label} once it starts.\n")
+    for i in range(seconds, 0, -1):
+        print(f"  Starting in {i}...", end="\r", flush=True)
+        time.sleep(1)
+    print("  Typing now!              ")
+
+
+# ─────────────────────────────────────────────
+#  TYPING
+# ─────────────────────────────────────────────
+
+
+def maybe_typo(char: str, cfg: Config):
+    """With small probability, mistype `char`, pause, backspace, and retype it correctly."""
+    if cfg.typo_chance <= 0 or not char.isalpha():
+        return
+    if random.random() >= cfg.typo_chance:
+        return
+    neighbors = QWERTY_NEIGHBORS.get(char.lower(), "")
+    wrong = random.choice(neighbors) if neighbors else random.choice("abcdefghijklmnopqrstuvwxyz")
+    if char.isupper():
+        wrong = wrong.upper()
+    try:
+        pyautogui.typewrite(wrong, interval=0)
+        time.sleep(rand_pause(cfg.typo_pause))
+        pyautogui.press("backspace")
+        time.sleep(rand_pause(cfg.typo_pause))
+    except Exception:
+        pass
+
+
+def type_text(text: str, cfg: Config, base_delay: float):
+    pyautogui.FAILSAFE = True
+
+    total = len(text)
+    typed = 0
+    since_thinking = 0
+    word_count = 0
+    next_chunk_at = random.randint(max(1, cfg.word_chunk_size - 1), cfg.word_chunk_size + 1)
+
+    progress = None
+    if _TQDM_AVAILABLE:
+        progress = tqdm(total=total, unit="ch", ncols=70, desc="Typing")
+
+    try:
+        for char in text:
+            maybe_typo(char, cfg)
+
+            try:
+                pyautogui.typewrite(char, interval=0)
+            except Exception:
+                pass
+
+            typed += 1
+            if progress:
+                progress.update(1)
+            elif typed % 100 == 0:
+                pct = typed / total * 100
+                print(f"  {pct:.0f}% typed ({typed}/{total} chars)", end="\r", flush=True)
+
+            if char == " ":
+                word_count += 1
+                if word_count >= next_chunk_at:
+                    word_count = 0
+                    next_chunk_at = random.randint(max(1, cfg.word_chunk_size - 1), cfg.word_chunk_size + 1)
+                    time.sleep(rand_pause(cfg.word_chunk_pause))
+                    since_thinking = 0
+                    continue
+
+            if char == ".":
+                time.sleep(rand_pause(cfg.fullstop_pause))
+                word_count = 0
+                since_thinking = 0
+                continue
+
+            jitter = random.uniform(0.70, 1.30)
+            delay = base_delay * jitter
+
+            if char in PUNCTUATION_PAUSES:
+                low, high = PUNCTUATION_PAUSES[char]
+                delay *= random.uniform(low, high)
+
+            since_thinking += 1
+            if since_thinking >= cfg.thinking_pause_every:
+                since_thinking = 0
+                if random.random() < cfg.thinking_pause_chance:
+                    delay += random.uniform(*cfg.thinking_pause_range)
+
+            time.sleep(delay)
+    except KeyboardInterrupt:
+        if progress:
+            progress.close()
+        print(f"\n\n{colorize(f'Interrupted — {typed}/{total} characters were typed.', Fore.YELLOW, cfg)}")
+        sys.exit(130)
+
+    if progress:
+        progress.close()
+
+    print(f"\n{colorize(f'Done! {total} characters typed.', Fore.GREEN, cfg)}")
+    notify_done(cfg)
+
+
+# ─────────────────────────────────────────────
+#  MAIN
+# ─────────────────────────────────────────────
 
 
 def main():
-    target_file = sys.argv[1] if len(sys.argv) > 1 else INPUT_FILE
+    cfg = load_config()
+    args = parse_args()
 
-    base_delay = resolve_base_delay()
-    text       = load_text(target_file)
-    est        = estimate_duration(text, base_delay)
+    if args.file:
+        cfg.input_file = args.file
+    if args.speed:
+        cfg.speed = args.speed
+    if args.wpm is not None:
+        cfg.wpm = args.wpm
+    if args.countdown is not None:
+        cfg.countdown = args.countdown
+    if args.no_color:
+        cfg.color = False
+    if args.no_sound:
+        cfg.sound_on_complete = False
 
-    confirm_or_exit(est, base_delay)
-    countdown(COUNTDOWN)
-    type_text(text, base_delay)
+    base_delay = resolve_base_delay(cfg)
+    text = load_text(cfg.input_file)
+    est = estimate_duration(text, base_delay, cfg)
+    finish_time = datetime.now() + timedelta(seconds=est["total"])
+
+    print_summary(est, base_delay, cfg, finish_time)
+
+    if args.dry_run:
+        print("  Dry run — no keys were sent.\n")
+        return
+
+    if not args.yes:
+        confirm()
+
+    countdown(cfg.countdown, est["total"], cfg)
+    type_text(text, cfg, base_delay)
 
 
 if __name__ == "__main__":

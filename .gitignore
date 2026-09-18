@@ -1,3 +1,6 @@
+# Environment variables (real config — keep private; .env.local is the tracked template)
+.env
+
 # Python
 __pycache__/
 *.py[cod]
