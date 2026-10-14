@@ -19,6 +19,7 @@ from typing import Optional, Tuple, Union
 
 try:
     import pyautogui
+    pyautogui.PAUSE = 0  # we control all pacing ourselves; don't add pyautogui's own delay
 except ImportError:
     print("Missing dependency: pyautogui\nRun:  pip install -r requirements.txt")
     sys.exit(1)
@@ -80,6 +81,11 @@ QWERTY_NEIGHBORS = {
     "u": "yhji", "v": "cfgb", "w": "qase", "x": "zsdc", "y": "tghu",
     "z": "asx",
 }
+
+# Gap to hold Shift before/after a keypress. Rich-text web editors (Google
+# Docs' canvas editor in particular) read the modifier state asynchronously,
+# so pressing Shift and the key in the same instant can register as lowercase.
+SHIFT_HOLD_DELAY = 0.02
 
 # ─────────────────────────────────────────────
 #  CONFIG (loaded from .env, overridable via CLI flags)
@@ -366,6 +372,19 @@ def countdown(seconds: int, total_estimate: float, cfg: Config):
 # ─────────────────────────────────────────────
 
 
+def press_char(char: str):
+    """Type a single character, explicitly holding Shift for capitals with a
+    brief gap around the keypress (see SHIFT_HOLD_DELAY)."""
+    if char.isalpha() and char.isupper():
+        pyautogui.keyDown("shift")
+        time.sleep(SHIFT_HOLD_DELAY)
+        pyautogui.press(char.lower())
+        time.sleep(SHIFT_HOLD_DELAY)
+        pyautogui.keyUp("shift")
+    else:
+        pyautogui.typewrite(char, interval=0)
+
+
 def maybe_typo(char: str, cfg: Config):
     """With small probability, mistype `char`, pause, backspace, and retype it correctly."""
     if cfg.typo_chance <= 0 or not char.isalpha():
@@ -377,7 +396,7 @@ def maybe_typo(char: str, cfg: Config):
     if char.isupper():
         wrong = wrong.upper()
     try:
-        pyautogui.typewrite(wrong, interval=0)
+        press_char(wrong)
         time.sleep(rand_pause(cfg.typo_pause))
         pyautogui.press("backspace")
         time.sleep(rand_pause(cfg.typo_pause))
@@ -403,7 +422,7 @@ def type_text(text: str, cfg: Config, base_delay: float):
             maybe_typo(char, cfg)
 
             try:
-                pyautogui.typewrite(char, interval=0)
+                press_char(char)
             except Exception:
                 pass
 
