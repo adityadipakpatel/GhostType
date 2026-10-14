@@ -73,6 +73,11 @@ PUNCTUATION_PAUSES = {
     "\n": (1.8, 3.0),
 }
 
+# Marks that get a genuine stop (like the full-stop pause) when
+# PUNCTUATION_PAUSE_ENABLED is on. "\n" is left out — it keeps its existing
+# lighter behavior below.
+STOPPING_PUNCTUATION = ("!", "?", ",", ";", ":")
+
 QWERTY_NEIGHBORS = {
     "a": "qsz", "b": "vghn", "c": "xdfv", "d": "serfcx", "e": "wsdr",
     "f": "drtgvc", "g": "ftyhbv", "h": "gyujnb", "i": "ujko", "j": "huikmn",
@@ -97,6 +102,8 @@ class Config:
     speed: str = "normal"
     wpm: Optional[float] = None
     fullstop_pause: PauseSetting = (4.5, 5.5)
+    punct_pause_enabled: bool = False
+    punct_pause: PauseSetting = (1.0, 2.0)
     word_chunk_size: int = 9
     word_chunk_pause: PauseSetting = (4.5, 5.5)
     input_file: str = "input.txt"
@@ -153,6 +160,8 @@ def load_config() -> Config:
         speed=env_str("SPEED", "normal"),
         wpm=env_float_or_none("WPM", None),
         fullstop_pause=env_pause("FULLSTOP_PAUSE", (4.5, 5.5)),
+        punct_pause_enabled=env_bool("PUNCTUATION_PAUSE_ENABLED", False),
+        punct_pause=env_pause("PUNCTUATION_PAUSE", (1.0, 2.0)),
         word_chunk_size=env_int("WORD_CHUNK_SIZE", 9),
         word_chunk_pause=env_pause("WORD_CHUNK_PAUSE", (4.5, 5.5)),
         input_file=env_str("INPUT_FILE", "input.txt"),
@@ -244,7 +253,10 @@ def estimate_duration(text: str, base_delay: float, cfg: Config) -> dict:
     punct_time = 0.0
     for char, (lo, hi) in PUNCTUATION_PAUSES.items():
         n = text.count(char)
-        punct_time += n * base_delay * ((lo + hi) / 2)
+        if cfg.punct_pause_enabled and char in STOPPING_PUNCTUATION:
+            punct_time += n * avg_pause(cfg.punct_pause)
+        else:
+            punct_time += n * base_delay * ((lo + hi) / 2)
 
     fullstop_count = text.count(".")
     fullstop_time = fullstop_count * avg_pause(cfg.fullstop_pause)
@@ -327,6 +339,8 @@ def print_summary(est: dict, base_delay: float, cfg: Config, finish_time: dateti
     print(f"    Base delay   {base_delay:.3f}s / char")
     if cfg.typo_chance > 0:
         print(f"    Typos        ~{cfg.typo_chance * 100:.0f}% chance per letter (auto-corrected)")
+    if cfg.punct_pause_enabled:
+        print(f"    Punct stops  ~{avg_pause(cfg.punct_pause):.1f}s at , ; : ! ?")
     print()
     print("  ESTIMATED TIME BREAKDOWN")
     print(f"    Typing               {format_duration(est['typing_time'])}")
@@ -444,6 +458,12 @@ def type_text(text: str, cfg: Config, base_delay: float):
 
             if char == ".":
                 time.sleep(rand_pause(cfg.fullstop_pause))
+                word_count = 0
+                since_thinking = 0
+                continue
+
+            if cfg.punct_pause_enabled and char in STOPPING_PUNCTUATION:
+                time.sleep(rand_pause(cfg.punct_pause))
                 word_count = 0
                 since_thinking = 0
                 continue

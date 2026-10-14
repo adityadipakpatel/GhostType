@@ -55,6 +55,11 @@ WPM=
 # Pause after every "." — long enough for Google Docs to register + save.
 FULLSTOP_PAUSE=4.5,5.5
 
+# Stop (like the full-stop pause) at other punctuation: , ; : ! ?
+# Off by default — otherwise they just add a small jitter to typing speed.
+PUNCTUATION_PAUSE_ENABLED=false
+PUNCTUATION_PAUSE=1.0,2.0
+
 # Pause every N words — forces a version history checkpoint in Google Docs.
 WORD_CHUNK_SIZE=9
 WORD_CHUNK_PAUSE=4.5,5.5
@@ -82,7 +87,7 @@ SOUND_ON_COMPLETE=true
 COLOR_OUTPUT=true
 ```
 
-Ranges (`FULLSTOP_PAUSE`, `WORD_CHUNK_PAUSE`, `TYPO_PAUSE`, `THINKING_PAUSE_RANGE`) accept either a single number (`5.0`) or `min,max` for randomization.
+Ranges (`FULLSTOP_PAUSE`, `PUNCTUATION_PAUSE`, `WORD_CHUNK_PAUSE`, `TYPO_PAUSE`, `THINKING_PAUSE_RANGE`) accept either a single number (`5.0`) or `min,max` for randomization.
 
 ---
 
