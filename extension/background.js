@@ -96,11 +96,20 @@ function pressBackspace(tabId) {
 
 // ── run control ────────────────────────────────
 
-/** Sleep in small slices so Stop/Pause react quickly and progress keeps updating. */
+/**
+ * Sleep in small slices so Stop/Pause react quickly and progress keeps updating.
+ * Time spent paused doesn't count toward the sleep.
+ */
 async function sleep(r, seconds) {
-  const end = Date.now() + seconds * 1000;
-  while (!r.stop && Date.now() < end) {
-    await new Promise((res) => setTimeout(res, Math.min(200, end - Date.now())));
+  let left = seconds * 1000;
+  while (!r.stop && left > 0) {
+    if (r.paused) {
+      await waitWhilePaused(r);
+      continue;
+    }
+    const slice = Math.min(200, left);
+    await new Promise((res) => setTimeout(res, slice));
+    left -= slice;
     await maybeReport(r);
   }
 }

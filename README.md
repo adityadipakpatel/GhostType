@@ -1,6 +1,6 @@
 # GhostType
 
-A lightweight Python script that reads a text file and types it out for you — keystroke by keystroke — with human-like speed variation, natural punctuation pauses, occasional typos, and Google Docs-friendly autosave checkpoints.
+A lightweight Python script (plus a [Chrome extension](#chrome-extension-types-in-the-background) that types in a background tab) that reads a text file and types it out for you — keystroke by keystroke — with human-like speed variation, natural punctuation pauses, occasional typos, and Google Docs-friendly autosave checkpoints.
 
 Useful for demos, presentations, filling out forms, or anything where you want text to appear as if it's being typed live.
 
@@ -174,6 +174,35 @@ GhostType doesn't type at a flat, robotic speed. It adds variation to feel natur
 
 ---
 
+## Chrome extension (types in the background)
+
+The Python script sends real keystrokes to whatever window is focused, so you can't use your computer while it runs. The Chrome extension in [`extension/`](extension/) sends keystrokes straight to one browser tab through Chrome's debugger API. Once it starts, you can switch tabs, use other apps or minimize Chrome while it types.
+
+### Install
+
+1. Open `chrome://extensions` and turn on **Developer mode** (top right)
+2. Click **Load unpacked** and select the `extension/` folder
+3. Pin GhostType from the puzzle-piece menu so the ghost icon stays on the toolbar
+
+### Use
+
+1. Open your Google Doc (or any web page) and click where the text should go
+2. Click the GhostType icon, paste your text, and check the time estimate
+3. Open **Settings** to change speed, pauses, typos and the rest. These are the same options as `.env`, and they're saved between sessions
+4. Click **Start typing in this tab**, then do whatever you like
+
+Open the popup at any time to see progress and the finish time, and to **Pause**, **Resume** or **Stop**. You get a desktop notification when typing finishes.
+
+### Good to know
+
+- Chrome shows a *"GhostType started debugging this browser"* bar while typing. That's expected. Clicking **Cancel** on it stops typing.
+- Keep the tab open. The extension keeps the computer awake while it types, but closing the laptop lid can still put it to sleep.
+- If DevTools is open on the tab, close it first. Only one debugger can attach to a tab at a time.
+- If typing stops partway (tab closed, Cancel clicked, Chrome restarted the extension), **Resume from here** continues from the last typed character.
+- **Input method:** *Key presses* (default) sends full key-down and key-up events like a real keyboard. *Insert text* is a fallback if a site ignores those.
+
+---
+
 ## File structure
 
 ```
@@ -183,7 +212,13 @@ GhostType/
 ├── requirements.txt
 ├── .env.local         # tracked config template — copy to .env
 ├── .gitignore
-└── README.md
+├── README.md
+└── extension/        # Chrome extension (background typing)
+    ├── manifest.json
+    ├── background.js # typing loop, drives the tab via chrome.debugger
+    ├── engine.js     # pacing + time estimate (port of ghosttype.py)
+    ├── popup.html / popup.css / popup.js
+    └── icons/
 ```
 
 ---
