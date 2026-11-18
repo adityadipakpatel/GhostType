@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>GhostType</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <img src="icons/icon32.png" alt="" width="20" height="20">
+    <h1>GhostType</h1>
+    <span id="pill" class="pill" hidden></span>
+  </header>
+
+  <!-- Shown while typing / paused / finished -->
+  <section id="runPanel" hidden>
+    <p class="target">Typing into <strong id="runTab"></strong></p>
+    <div class="bar"><div id="runBar"></div></div>
+    <div class="runStats">
+      <span id="runCount"></span>
+      <span id="runLeft"></span>
+    </div>
+    <p id="runMsg" class="msg" hidden></p>
+    <div class="buttons">
+      <button id="pauseBtn">Pause</button>
+      <button id="resumeBtn" hidden>Resume</button>
+      <button id="stopBtn" class="danger">Stop</button>
+      <button id="resumeStoppedBtn" hidden>Resume from here</button>
+      <button id="gotoBtn" class="ghost">Go to tab</button>
+      <button id="dismissBtn" class="ghost" hidden>New text</button>
+    </div>
+  </section>
+
+  <!-- Shown when idle -->
+  <section id="setupPanel">
+    <textarea id="text" placeholder="Paste the text to type…" spellcheck="false"></textarea>
+    <p id="estimate" class="estimate"></p>
+
+    <details id="settings">
+      <summary>Settings</summary>
+      <div class="grid">
+        <label>Speed
+          <select id="speed">
+            <option value="slow">Slow (~30 WPM)</option>
+            <option value="normal">Normal (~60 WPM)</option>
+            <option value="fast">Fast (~120 WPM)</option>
+            <option value="custom">Custom WPM</option>
+          </select>
+        </label>
+        <label id="wpmRow">WPM
+          <input id="wpm" type="number" min="1" step="1">
+        </label>
+        <label>Full-stop pause (s)
+          <input id="fullstopPause" type="text" placeholder="4.5,5.5">
+        </label>
+        <label>Pause every N words
+          <input id="wordChunkSize" type="number" min="1" step="1">
+        </label>
+        <label>Word pause (s)
+          <input id="wordChunkPause" type="text" placeholder="4.5,5.5">
+        </label>
+        <label class="check">
+          <input id="punctPauseEnabled" type="checkbox"> Stop at , ; : ! ?
+        </label>
+        <label id="punctPauseRow">Punctuation pause (s)
+          <input id="punctPause" type="text" placeholder="1.0,2.0">
+        </label>
+        <label>Typo chance (%)
+          <input id="typoChance" type="number" min="0" max="100" step="0.5">
+        </label>
+        <label>Typo pause (s)
+          <input id="typoPause" type="text" placeholder="0.15,0.35">
+        </label>
+        <label>Thinking pause every N chars
+          <input id="thinkingPauseEvery" type="number" min="1" step="1">
+        </label>
+        <label>Thinking pause chance (%)
+          <input id="thinkingPauseChance" type="number" min="0" max="100" step="1">
+        </label>
+        <label>Thinking pause (s)
+          <input id="thinkingPauseRange" type="text" placeholder="0.4,1.2">
+        </label>
+        <label>Input method
+          <select id="inputMode">
+            <option value="keys">Key presses</option>
+            <option value="insertText">Insert text</option>
+          </select>
+        </label>
+        <label class="check">
+          <input id="notifyOnComplete" type="checkbox"> Notify when finished
+        </label>
+      </div>
+      <button id="resetBtn" class="ghost small">Reset to defaults</button>
+    </details>
+
+    <p id="error" class="msg error" hidden></p>
+    <button id="startBtn" class="primary">Start typing in this tab</button>
+    <p class="hint">Click where the text should go in your doc first. After starting you can switch tabs or apps. Keep the tab open and the laptop awake.</p>
+  </section>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
